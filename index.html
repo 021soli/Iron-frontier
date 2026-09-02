@@ -340,6 +340,17 @@
 <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
 <script>
 const ONCHAIN_CONTRACT_ADDRESS = '0x5ee966D5b01531842447953b3dB2705C6C467093'; // deployed IronFrontierSessions contract (Base mainnet)
+const BUILDER_CODE = 'bc_qlr4nnab';
+
+// ERC-8021 attribution suffix: [code ascii][codeLength(1B)][schemaId(1B)=0x00][marker(16B)]
+function encodeBuilderCodeSuffix(code) {
+  const bytes = new TextEncoder().encode(code);
+  if (bytes.length === 0 || bytes.length > 255) return null;
+  const marker = '80218021802180218021802180218021';
+  const codeHex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  const lenHex = bytes.length.toString(16).padStart(2, '0');
+  return '0x' + codeHex + lenHex + '00' + marker;
+}
 const ONCHAIN_ABI = [
   'function startGame() external',
   'event GameStarted(address indexed player, uint256 timestamp)'
@@ -367,8 +378,13 @@ async function logSessionOnChain() {
     await provider.send('eth_requestAccounts', []);
     const signer = await provider.getSigner();
     const contract = new ethers.Contract(ONCHAIN_CONTRACT_ADDRESS, ONCHAIN_ABI, signer);
+    const populatedTx = await contract.startGame.populateTransaction();
+    if (BUILDER_CODE && BUILDER_CODE !== 'YOUR-BUILDER-CODE') {
+      const suffix = encodeBuilderCodeSuffix(BUILDER_CODE);
+      if (suffix) populatedTx.data = populatedTx.data + suffix.slice(2);
+    }
     onchainStatus.textContent = 'Confirm the transaction in your wallet…';
-    const tx = await contract.startGame();
+    const tx = await signer.sendTransaction(populatedTx);
     onchainStatus.textContent = 'Waiting for confirmation…';
     await tx.wait();
     onchainStatus.textContent = 'Session logged on-chain ✓';
